@@ -12,14 +12,17 @@ logging.basicConfig(
 )
 
 class CWJobsScraper:
-    def __init__(self):
+    def __init__(self, max_retries=3):
         self.jobs = []  # In-memory storage for testing
+        self.max_retries = max_retries
 
     async def scrape_cwjobs(self, role, area, pages=1):
         """Scrape CWJobs for a given role and area; store results in memory."""
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(user_agent="Mozilla/5.0 ...")
+            context = await browser.new_context(user_agent=user_agent)
             page = await context.new_page()
 
             try:
@@ -27,12 +30,23 @@ class CWJobsScraper:
                     url = f"https://www.cwjobs.co.uk/jobs/{role.replace(' ', '-')}/in-{area}?page={i}"
                     logging.info(f"Scraping page {i}: {url}")
 
-                    try:
-                        await page.goto(url)
-                        await asyncio.sleep(random.uniform(2, 4))  # Random jitter
-                    except Exception as e:
-                        logging.error(f"Failed to load page {i}: {e}")
+                    page_loaded = False
+                    for attempt in range(1, self.max_retries + 1):
+                        try:
+                            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                            page_loaded = True
+                            break
+                        except Exception as e:
+                            logging.warning(f"Attempt {attempt}/{self.max_retries} failed for page {i}: {e}")
+                            if attempt < self.max_retries:
+                                await asyncio.sleep(random.uniform(3, 6))
+                            else:
+                                logging.error(f"Failed to load page {i} after {self.max_retries} attempts")
+
+                    if not page_loaded:
                         continue
+
+                    await asyncio.sleep(random.uniform(2, 4))  # Random jitter
 
                     soup = BeautifulSoup(await page.content(), "html.parser")
                     cards = soup.select('article[data-testid="job-card"]')

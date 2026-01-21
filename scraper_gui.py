@@ -5,6 +5,8 @@ from bs4 import BeautifulSoup
 import urllib3
 import threading
 import webbrowser
+import asyncio
+from webscraper import CWJobsScraper
 
 # Suppress SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -16,6 +18,7 @@ class JobScraperGUI:
         self.root.geometry('1200x700')
 
         self.jobs_data = []
+        self.scraper = CWJobsScraper()
 
         self.setup_ui()
 
@@ -24,13 +27,36 @@ class JobScraperGUI:
         control_frame = ttk.Frame(self.root, padding='10')
         control_frame.pack(fill='x')
 
-        ttk.Label(control_frame, text='North East Jobs Scraper', font=('Arial', 14, 'bold')).pack(side='left')
+        ttk.Label(control_frame, text='Job Scraper - CWJobs & North East Jobs', font=('Arial', 14, 'bold')).pack(side='left')
 
         self.status_label = ttk.Label(control_frame, text='Ready')
         self.status_label.pack(side='right', padx=10)
 
-        self.fetch_btn = ttk.Button(control_frame, text='Fetch Jobs', command=self.start_fetch)
-        self.fetch_btn.pack(side='right')
+        # Button frame
+        btn_frame = ttk.Frame(control_frame)
+        btn_frame.pack(side='right', padx=5)
+
+        self.fetch_btn = ttk.Button(btn_frame, text='Fetch CWJobs', command=self.start_fetch_cwjobs)
+        self.fetch_btn.pack(side='left', padx=2)
+
+        self.fetch_ne_btn = ttk.Button(btn_frame, text='Fetch NE Jobs', command=self.start_fetch_ne_jobs)
+        self.fetch_ne_btn.pack(side='left', padx=2)
+
+        # Input frame for CWJobs search
+        input_frame = ttk.LabelFrame(control_frame, text='CWJobs Search', padding='5')
+        input_frame.pack(side='left', padx=10)
+
+        ttk.Label(input_frame, text='Role:').pack(side='left', padx=2)
+        self.role_var = tk.StringVar(value='Python Developer')
+        ttk.Entry(input_frame, textvariable=self.role_var, width=15).pack(side='left', padx=2)
+
+        ttk.Label(input_frame, text='Area:').pack(side='left', padx=2)
+        self.area_var = tk.StringVar(value='London')
+        ttk.Entry(input_frame, textvariable=self.area_var, width=15).pack(side='left', padx=2)
+
+        ttk.Label(input_frame, text='Pages:').pack(side='left', padx=2)
+        self.pages_var = tk.StringVar(value='1')
+        ttk.Spinbox(input_frame, from_=1, to=10, textvariable=self.pages_var, width=3).pack(side='left', padx=2)
 
         # Progress bar
         self.progress = ttk.Progressbar(self.root, mode='indeterminate')
@@ -102,6 +128,43 @@ class JobScraperGUI:
         # Run in thread to keep UI responsive
         thread = threading.Thread(target=self.fetch_jobs, daemon=True)
         thread.start()
+
+    def start_fetch_cwjobs(self):
+        self.fetch_btn.config(state='disabled')
+        self.fetch_ne_btn.config(state='disabled')
+        self.status_label.config(text='Fetching CWJobs...')
+        self.progress.start()
+
+        # Run in thread to keep UI responsive
+        thread = threading.Thread(target=self.fetch_cwjobs_async, daemon=True)
+        thread.start()
+
+    def start_fetch_ne_jobs(self):
+        self.fetch_btn.config(state='disabled')
+        self.fetch_ne_btn.config(state='disabled')
+        self.status_label.config(text='Fetching North East Jobs...')
+        self.progress.start()
+
+        # Run in thread to keep UI responsive
+        thread = threading.Thread(target=self.fetch_jobs, daemon=True)
+        thread.start()
+
+    def fetch_cwjobs_async(self):
+        try:
+            role = self.role_var.get()
+            area = self.area_var.get()
+            pages = int(self.pages_var.get())
+
+            # Run async scraper in thread
+            scraper = CWJobsScraper()
+            asyncio.run(scraper.scrape_cwjobs(role, area, pages=pages))
+
+            self.jobs_data = scraper.jobs
+            self.root.after(0, self.update_table)
+
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror('Error', f'Failed to fetch CWJobs: {e}'))
+            self.root.after(0, self.reset_ui)
 
     def fetch_jobs(self):
         try:
@@ -179,6 +242,7 @@ class JobScraperGUI:
     def reset_ui(self):
         self.progress.stop()
         self.fetch_btn.config(state='normal')
+        self.fetch_ne_btn.config(state='normal')
         self.status_label.config(text='Ready')
 
     def show_description(self, event):
